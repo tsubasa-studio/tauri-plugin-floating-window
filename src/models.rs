@@ -10,7 +10,7 @@ pub struct CreateConfig {
     pub y: Option<f64>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateResponse {
     pub tag: String,
@@ -31,7 +31,7 @@ pub struct MoveConfig {
     pub animated: Option<bool>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionResponse {
     pub granted: bool,
