@@ -38,7 +38,13 @@
 
   async function _create() {
     try {
-      const tag = await create()
+      const tag = await create({
+        width: 140,
+        height: 140,
+        x: 120,
+        y: 120,
+        url: 'http://tauri.localhost/floating.html',
+      })
       log(`Created floating window: ${tag}`)
     } catch (e) {
       log(`Error: ${e}`)

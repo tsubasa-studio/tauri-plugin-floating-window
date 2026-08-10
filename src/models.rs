@@ -8,6 +8,7 @@ pub struct CreateConfig {
     pub height: Option<f64>,
     pub x: Option<f64>,
     pub y: Option<f64>,
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
