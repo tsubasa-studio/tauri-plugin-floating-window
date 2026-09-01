@@ -12,7 +12,7 @@
 
 ## 运行环境
 
-- Node.js + pnpm
+- Node.js + bun
 - Rust toolchain（≥ 1.77.2）
 - Android：Android SDK / NDK
 - iOS：Xcode / macOS（若编译 iOS 示例）
@@ -24,15 +24,15 @@
 在仓库根目录安装依赖并构建插件：
 
 ```powershell
-pnpm install
-pnpm build
+bun install
+bun run build
 ```
 
 ### 2. 安装示例 App 依赖
 
 ```powershell
 cd examples\tauri-app
-pnpm install
+bun install
 ```
 
 ### 3. 启动示例 App
@@ -42,12 +42,12 @@ pnpm install
 如果希望在桌面上调试前端和插件逻辑，可使用：
 
 ```powershell
-pnpm tauri dev
+bun tauri dev
 ```
 
 这会同时启动前端和 Rust 后端，适合快速验证插件 API 调用。
 
-> 注意：`pnpm tauri dev` 只是用于桌面预览，不等同于 Android/iOS 的移动端运行方式。
+> 注意：`bun tauri dev` 只是用于桌面预览，不等同于 Android/iOS 的移动端运行方式。
 
 #### 3.2 Android 运行
 
@@ -71,7 +71,7 @@ cargo tauri android dev
 cargo tauri ios dev
 ```
 
-> 如果只想预览前端界面，可运行 `pnpm dev`，但此时 Tauri IPC 不可用，悬浮窗插件功能不能正常工作。
+> 如果只想预览前端界面，可运行 `bun dev`，但此时 Tauri IPC 不可用，悬浮窗插件功能不能正常工作。
 
 ## 使用插件 API
 
@@ -149,7 +149,7 @@ await moveWindow(tag, 200, 300, true);
 ## 构建生产包
 
 ```powershell
-pnpm tauri build
+bun tauri build
 ```
 
 ## 说明

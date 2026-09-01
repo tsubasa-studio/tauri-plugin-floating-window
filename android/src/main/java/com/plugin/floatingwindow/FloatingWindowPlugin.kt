@@ -6,12 +6,12 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import androidx.webkit.WebViewAssetLoader
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
@@ -20,9 +20,14 @@ import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import com.petterp.floatingx.FloatingX
 import com.petterp.floatingx.assist.FxScopeType
-import org.json.JSONObject
+import java.io.ByteArrayInputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.FilterInputStream
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLConnection
 
 @InvokeArg
 class CreateArgs {
@@ -32,6 +37,8 @@ class CreateArgs {
     var x: Double? = null
     var y: Double? = null
     var url: String? = null
+    var devServerUrl: String? = null
+    var assetRoot: String? = null
 }
 
 @InvokeArg
@@ -53,42 +60,29 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
     companion object {
         private const val DEFAULT_TAG = "default"
         private const val CLICK_EVENT = "floating-window-click"
+        private const val LOG_TAG = "FloatingWindowPlugin"
 
-        // Tauri serves app assets from tauri.localhost via WebViewAssetLoader.
-        // We replicate this for the floating window's standalone WebView.
-        // See: https://github.com/tauri-apps/wry/blob/dev/src/android/kotlin/RustWebViewClient.kt
+        // Keep the same origin as Tauri's main WebView so localStorage is shared.
         private const val TAURI_DOMAIN = "tauri.localhost"
     }
 
-    /**
-     * Dev server URL, resolved from tauri.conf.json's build.devUrl.
-     * If devUrl uses localhost, it's replaced with 10.0.2.2
-     * (Android emulator's alias for the host machine's localhost).
-     * See: https://developer.android.com/studio/run/emulator-networking
-     */
-    private val devServerUrl: String by lazy { resolveDevServerUrl() }
+    private val webViews = mutableMapOf<String, WebView>()
 
-    private fun resolveDevServerUrl(): String {
-        return try {
-            val json = activity.assets.open("tauri.conf.json")
-                .bufferedReader().use { it.readText() }
-            val devUrl = JSONObject(json)
-                .optJSONObject("build")
-                ?.optString("devUrl", "")
-                ?: ""
-            if (devUrl.isNotEmpty()) {
-                var url = devUrl.trimEnd('/')
-                // Android emulator maps 10.0.2.2 → host's localhost.
-                // For physical devices, devUrl should already use a LAN IP.
-                if (url.contains("localhost")) {
-                    url = url.replace("localhost", "10.0.2.2")
-                }
-                url
-            } else {
-                "http://10.0.2.2:5173"
-            }
-        } catch (e: Exception) {
-            "http://10.0.2.2:5173"
+    private fun disposeFloatingWindow(tag: String) {
+        val webView = webViews.remove(tag)
+        try {
+            FloatingX.control(tag).cancel()
+        } catch (_: Exception) {
+            // Destroy is intentionally idempotent.
+        }
+        webView?.apply {
+            stopLoading()
+            onPause()
+            removeAllViews()
+            destroy()
+        }
+        if (webViews.isEmpty()) {
+            FloatingWindowForegroundService.stop(activity.applicationContext)
         }
     }
 
@@ -121,18 +115,29 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
 
     @Command
     fun create(invoke: Invoke) {
+        var createdTag: String? = null
         try {
             val args = invoke.parseArgs(CreateArgs::class.java)
             val tag = args.tag ?: DEFAULT_TAG
+            createdTag = tag
             val url = args.url
+            val devServerUrl = args.devServerUrl
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?.trimEnd('/')
+            val bundledAssetRoot = args.assetRoot
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?.let(::File)
+                ?.canonicalFile
+                ?.takeIf { it.isDirectory }
 
-            // WebViewAssetLoader matching Tauri/WRY's configuration.
-            // Serves the app's bundled assets from tauri.localhost (production mode).
-            val assetLoader = WebViewAssetLoader.Builder()
-                .setDomain(TAURI_DOMAIN)
-                .addPathHandler("/", WebViewAssetLoader.AssetsPathHandler(activity))
-                .build()
+            if (devServerUrl == null && bundledAssetRoot == null) {
+                throw IllegalStateException("Bundled floating-window assets are unavailable")
+            }
 
+            // Reusing a tag must replace and release the previous WebView.
+            disposeFloatingWindow(tag)
             val control = FloatingX.install {
                 setContext(activity.application)
                 setLayout(R.layout.fx_default)
@@ -156,6 +161,9 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
                     webView.settings.javaScriptEnabled = true
                     webView.settings.domStorageEnabled = true
                     webView.settings.mediaPlaybackRequiresUserGesture = false
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
+                    }
 
                     // Custom WebViewClient that serves tauri.localhost content,
                     // matching how the main Tauri WebView (WRY) serves assets.
@@ -171,25 +179,14 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
                                 return null
                             }
 
-                            // 1. Production: serve from bundled assets
-                            assetLoader.shouldInterceptRequest(request.url)?.let { return it }
-
-                            // 2. SPA fallback: serve index.html for navigation requests
-                            //    (e.g. /desktop-pet is a client-side route, not a file)
-                            val acceptHeader = request.requestHeaders["Accept"] ?: ""
-                            if (acceptHeader.contains("text/html")) {
-                                try {
-                                    val inputStream = activity.assets.open("index.html")
-                                    return WebResourceResponse("text/html", "UTF-8", inputStream)
-                                } catch (e: Exception) {
-                                    // index.html not in assets — dev mode, fall through
-                                }
+                            // Only `tauri android dev` supplies a dev server URL.
+                            if (devServerUrl != null) {
+                                return proxyRequest(request, devServerUrl)
                             }
 
-                            // 3. Dev mode fallback: proxy to Vite dev server.
-                            //    In dev mode there are no bundled assets, so all
-                            //    tauri.localhost requests fall through to here.
-                            return proxyRequest(request, devServerUrl)
+                            // Build APKs use the assets extracted from Tauri's embedded Rust
+                            // resource bundle. Never fall through to the network for this host.
+                            return serveBundledAsset(request, bundledAssetRoot!!)
                         }
                     }
 
@@ -211,7 +208,7 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
                                         val data = JSObject()
                                         data.put("tag", tag)
                                         trigger("floating-window-closed", data)
-                                        FloatingX.control(tag).cancel()
+                                        disposeFloatingWindow(tag)
                                     } catch (_: Exception) {
                                     }
                                 }
@@ -220,10 +217,14 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
                         "AndroidFloatingWindow"
                     )
 
+                    webViews[tag] = webView
+                    FloatingWindowForegroundService.start(activity.applicationContext)
+                    webView.onResume()
+
                     if (url != null) {
                         // Always load the tauri.localhost URL so the floating window
                         // shares the main app's origin (localStorage is shared).
-                        // Production: assetLoader serves bundled assets.
+                        // Build APK: extracted embedded assets are served locally.
                         // Dev: shouldInterceptRequest proxies to the Vite dev server.
                         webView.loadUrl(url)
                     }
@@ -234,15 +235,193 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
             ret.put("tag", tag)
             invoke.resolve(ret)
         } catch (e: Exception) {
+            createdTag?.let(::disposeFloatingWindow)
             invoke.reject(e.message ?: "Failed to create floating window")
         }
     }
 
+    private fun serveBundledAsset(
+        request: WebResourceRequest,
+        assetRoot: File
+    ): WebResourceResponse {
+        if (request.method != "GET" && request.method != "HEAD") {
+            return errorResponse(405, "Method Not Allowed")
+        }
+
+        val acceptHeader = request.requestHeaders.entries
+            .firstOrNull { it.key.equals("Accept", ignoreCase = true) }
+            ?.value
+            .orEmpty()
+        val requestedPath = request.url.path.orEmpty().trimStart('/')
+        val relativePath = if (
+            request.isForMainFrame || acceptHeader.contains("text/html", ignoreCase = true)
+        ) {
+            "index.html"
+        } else {
+            requestedPath
+        }
+
+        val file = resolveBundledAsset(assetRoot, relativePath)
+            ?: return errorResponse(404, "Not Found")
+        return fileResponse(request, file)
+    }
+
+    private fun resolveBundledAsset(assetRoot: File, relativePath: String): File? {
+        if (relativePath.isEmpty()) return null
+        return try {
+            val canonicalRoot = assetRoot.canonicalFile
+            val candidate = File(canonicalRoot, relativePath).canonicalFile
+            val allowedPrefix = canonicalRoot.path + File.separator
+            candidate.takeIf {
+                it.isFile && it.path.startsWith(allowedPrefix)
+            }
+        } catch (e: Exception) {
+            Log.e(LOG_TAG, "Failed to resolve bundled asset $relativePath", e)
+            null
+        }
+    }
+
+    private fun fileResponse(
+        request: WebResourceRequest,
+        file: File
+    ): WebResourceResponse {
+        val totalLength = file.length()
+        val mimeType = guessMimeType(file.name)
+        val encoding = if (
+            mimeType.startsWith("text/") ||
+            mimeType == "application/javascript" ||
+            mimeType == "application/json" ||
+            mimeType == "image/svg+xml"
+        ) {
+            "UTF-8"
+        } else {
+            null
+        }
+        val rangeHeader = request.requestHeaders.entries
+            .firstOrNull { it.key.equals("Range", ignoreCase = true) }
+            ?.value
+
+        if (rangeHeader != null) {
+            val range = parseByteRange(rangeHeader, totalLength)
+                ?: return errorResponse(
+                    416,
+                    "Range Not Satisfiable",
+                    mapOf("Content-Range" to "bytes */$totalLength")
+                )
+            val contentLength = range.last - range.first + 1
+            val stream = FileInputStream(file)
+            if (!skipFully(stream, range.first)) {
+                stream.close()
+                return errorResponse(416, "Range Not Satisfiable")
+            }
+            val body: InputStream = if (request.method == "HEAD") {
+                stream.close()
+                ByteArrayInputStream(ByteArray(0))
+            } else {
+                BoundedInputStream(stream, contentLength)
+            }
+            return WebResourceResponse(
+                mimeType,
+                encoding,
+                206,
+                "Partial Content",
+                mapOf(
+                    "Accept-Ranges" to "bytes",
+                    "Content-Length" to contentLength.toString(),
+                    "Content-Range" to "bytes ${range.first}-${range.last}/$totalLength"
+                ),
+                body
+            )
+        }
+
+        val body: InputStream = if (request.method == "HEAD") {
+            ByteArrayInputStream(ByteArray(0))
+        } else {
+            FileInputStream(file)
+        }
+        return WebResourceResponse(
+            mimeType,
+            encoding,
+            200,
+            "OK",
+            mapOf(
+                "Accept-Ranges" to "bytes",
+                "Content-Length" to totalLength.toString()
+            ),
+            body
+        )
+    }
+
+    private fun parseByteRange(value: String, totalLength: Long): LongRange? {
+        if (totalLength <= 0 || !value.startsWith("bytes=", ignoreCase = true)) return null
+        val spec = value.substringAfter('=').substringBefore(',').trim()
+        val bounds = spec.split('-', limit = 2)
+        if (bounds.size != 2) return null
+
+        val startText = bounds[0].trim()
+        val endText = bounds[1].trim()
+        val start: Long
+        val end: Long
+        if (startText.isEmpty()) {
+            val suffixLength = endText.toLongOrNull()?.takeIf { it > 0 } ?: return null
+            start = (totalLength - suffixLength).coerceAtLeast(0)
+            end = totalLength - 1
+        } else {
+            start = startText.toLongOrNull() ?: return null
+            if (start < 0 || start >= totalLength) return null
+            end = endText.toLongOrNull()?.coerceAtMost(totalLength - 1) ?: (totalLength - 1)
+            if (end < start) return null
+        }
+        return start..end
+    }
+
+    private fun skipFully(stream: InputStream, byteCount: Long): Boolean {
+        var remaining = byteCount
+        while (remaining > 0) {
+            val skipped = stream.skip(remaining)
+            if (skipped > 0) {
+                remaining -= skipped
+            } else if (stream.read() == -1) {
+                return false
+            } else {
+                remaining -= 1
+            }
+        }
+        return true
+    }
+
+    private fun guessMimeType(fileName: String): String {
+        return when (fileName.substringAfterLast('.', "").lowercase()) {
+            "js", "mjs" -> "application/javascript"
+            "json", "map" -> "application/json"
+            "wasm" -> "application/wasm"
+            "svg" -> "image/svg+xml"
+            "mp4" -> "video/mp4"
+            "webm" -> "video/webm"
+            else -> URLConnection.guessContentTypeFromName(fileName) ?: "application/octet-stream"
+        }
+    }
+
+    private fun errorResponse(
+        statusCode: Int,
+        reasonPhrase: String,
+        headers: Map<String, String> = emptyMap()
+    ): WebResourceResponse {
+        val body = reasonPhrase.toByteArray(Charsets.UTF_8)
+        return WebResourceResponse(
+            "text/plain",
+            "UTF-8",
+            statusCode,
+            reasonPhrase,
+            headers + mapOf("Content-Length" to body.size.toString()),
+            ByteArrayInputStream(body)
+        )
+    }
+
     /**
-     * Dev mode fallback: proxy a GET request to [baseUrl] (the Vite dev server).
-     * Only used for stray tauri.localhost requests that reach shouldInterceptRequest
-     * in dev mode — in normal dev operation the window loads [devServerUrl] directly
-     * and this is never called. Forwards Range headers so video streaming works.
+     * Dev mode: proxy a GET request to [baseUrl] (the Vite dev server).
+     * The floating WebView keeps the tauri.localhost origin so it shares storage
+     * with the main WebView. Forwards Range headers so video streaming works.
      */
     private fun proxyRequest(
         request: WebResourceRequest,
@@ -251,7 +430,7 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
         if (request.method != "GET") return null
 
         val proxyUrl = request.url.toString()
-            .replace("http://$TAURI_DOMAIN", baseUrl)
+            .replace(Regex("^https?://${Regex.escape(TAURI_DOMAIN)}"), baseUrl)
 
         return try {
             val connection = URL(proxyUrl).openConnection() as HttpURLConnection
@@ -313,6 +492,7 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
                 inputStream
             )
         } catch (e: Exception) {
+            Log.e(LOG_TAG, "Failed to proxy $proxyUrl", e)
             null
         }
     }
@@ -322,6 +502,10 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
         try {
             val args = invoke.parseArgs(TagArgs::class.java)
             val tag = args.tag ?: DEFAULT_TAG
+            webViews[tag]?.onResume()
+            if (webViews.containsKey(tag)) {
+                FloatingWindowForegroundService.start(activity.applicationContext)
+            }
             FloatingX.control(tag).show()
             invoke.resolve()
         } catch (e: Exception) {
@@ -334,6 +518,7 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
         try {
             val args = invoke.parseArgs(TagArgs::class.java)
             val tag = args.tag ?: DEFAULT_TAG
+            webViews[tag]?.onPause()
             FloatingX.control(tag).hide()
             invoke.resolve()
         } catch (e: Exception) {
@@ -361,11 +546,47 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
         try {
             val args = invoke.parseArgs(TagArgs::class.java)
             val tag = args.tag ?: DEFAULT_TAG
-            FloatingX.control(tag).cancel()
+            disposeFloatingWindow(tag)
             invoke.resolve()
         } catch (e: Exception) {
             invoke.reject(e.message ?: "Failed to destroy floating window")
         }
     }
 
+}
+
+private class BoundedInputStream(
+    input: InputStream,
+    private var remaining: Long
+) : FilterInputStream(input) {
+    override fun read(): Int {
+        if (remaining <= 0) return -1
+        val value = super.read()
+        if (value == -1) {
+            remaining = 0
+        } else {
+            remaining -= 1
+        }
+        return value
+    }
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+        if (remaining <= 0) return -1
+        val allowed = minOf(length.toLong(), remaining).toInt()
+        val count = super.read(buffer, offset, allowed)
+        if (count == -1) {
+            remaining = 0
+        } else {
+            remaining -= count.toLong()
+        }
+        return count
+    }
+
+    override fun skip(byteCount: Long): Long {
+        val skipped = super.skip(minOf(byteCount, remaining))
+        remaining -= skipped
+        return skipped
+    }
+
+    override fun available(): Int = minOf(super.available().toLong(), remaining).toInt()
 }

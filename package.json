@@ -1,7 +1,7 @@
 {
   "name": "tauri-plugin-floating-window-api",
   "version": "0.1.0",
-  "author": "You",
+  "author": "tsubasa-studio",
   "description": "",
   "type": "module",
   "types": "./dist-js/index.d.ts",

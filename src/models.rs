@@ -9,6 +9,10 @@ pub struct CreateConfig {
     pub x: Option<f64>,
     pub y: Option<f64>,
     pub url: Option<String>,
+    #[serde(default)]
+    pub dev_server_url: Option<String>,
+    #[serde(default)]
+    pub asset_root: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
