@@ -2193,10 +2193,10 @@
           "markdownDescription": "Denies the unminimize command without any pre-configured scope."
         },
         {
-          "description": "Default permissions for the floating-window plugin\n#### This default permission set includes:\n\n- `allow-check-permission`\n- `allow-request-permission`\n- `allow-create`\n- `allow-show`\n- `allow-hide`\n- `allow-move-window`\n- `allow-destroy`",
+          "description": "Default permissions for the floating-window plugin\n#### This default permission set includes:\n\n- `allow-check-permission`\n- `allow-request-permission`\n- `allow-create`\n- `allow-show`\n- `allow-hide`\n- `allow-move-window`\n- `allow-destroy`\n- `allow-register-listener`\n- `allow-remove-listener`",
           "type": "string",
           "const": "floating-window:default",
-          "markdownDescription": "Default permissions for the floating-window plugin\n#### This default permission set includes:\n\n- `allow-check-permission`\n- `allow-request-permission`\n- `allow-create`\n- `allow-show`\n- `allow-hide`\n- `allow-move-window`\n- `allow-destroy`"
+          "markdownDescription": "Default permissions for the floating-window plugin\n#### This default permission set includes:\n\n- `allow-check-permission`\n- `allow-request-permission`\n- `allow-create`\n- `allow-show`\n- `allow-hide`\n- `allow-move-window`\n- `allow-destroy`\n- `allow-register-listener`\n- `allow-remove-listener`"
         },
         {
           "description": "Enables the check_permission command without any pre-configured scope.",
@@ -2227,6 +2227,18 @@
           "type": "string",
           "const": "floating-window:allow-move-window",
           "markdownDescription": "Enables the move_window command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the register_listener command without any pre-configured scope.",
+          "type": "string",
+          "const": "floating-window:allow-register-listener",
+          "markdownDescription": "Enables the register_listener command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the remove_listener command without any pre-configured scope.",
+          "type": "string",
+          "const": "floating-window:allow-remove-listener",
+          "markdownDescription": "Enables the remove_listener command without any pre-configured scope."
         },
         {
           "description": "Enables the request_permission command without any pre-configured scope.",
@@ -2269,6 +2281,18 @@
           "type": "string",
           "const": "floating-window:deny-move-window",
           "markdownDescription": "Denies the move_window command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the register_listener command without any pre-configured scope.",
+          "type": "string",
+          "const": "floating-window:deny-register-listener",
+          "markdownDescription": "Denies the register_listener command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the remove_listener command without any pre-configured scope.",
+          "type": "string",
+          "const": "floating-window:deny-remove-listener",
+          "markdownDescription": "Denies the remove_listener command without any pre-configured scope."
         },
         {
           "description": "Denies the request_permission command without any pre-configured scope.",

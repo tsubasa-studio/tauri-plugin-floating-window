@@ -11,6 +11,8 @@ Default permissions for the floating-window plugin
 - `allow-hide`
 - `allow-move-window`
 - `allow-destroy`
+- `allow-register-listener`
+- `allow-remove-listener`
 
 ## Permission Table
 
@@ -147,6 +149,58 @@ Enables the move_window command without any pre-configured scope.
 <td>
 
 Denies the move_window command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`floating-window:allow-register-listener`
+
+</td>
+<td>
+
+Enables the register_listener command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`floating-window:deny-register-listener`
+
+</td>
+<td>
+
+Denies the register_listener command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`floating-window:allow-remove-listener`
+
+</td>
+<td>
+
+Enables the remove_listener command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`floating-window:deny-remove-listener`
+
+</td>
+<td>
+
+Denies the remove_listener command without any pre-configured scope.
 
 </td>
 </tr>
