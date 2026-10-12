@@ -15,6 +15,8 @@ alone does not verify WebView behavior on a device.
 4. Tap an overlay: the main log must show its tag. Close it from its page: the log
    must show `closed` with the same tag. Reopening the main view must not accumulate
    duplicate event callbacks (both subscriptions are removed on unmount).
+   Repeat with both tags; each tap must log once for its own tag. Dragging must move
+   the overlay without a click log or activating the page's Close button.
 5. On a fresh installation or after clearing this example app's cache, press
    Create both concurrently. Both tags must succeed and load the floating page.
 6. Leave Custom notification text unchecked: title uses the host application
@@ -85,8 +87,47 @@ Kotlin dependencies were downloaded. The final in-process compiler invocation
 avoids the machine's Kotlin daemon incremental-cache failure. Existing dependency
 deprecation warnings and the missing `consumer-rules.pro` warning remain.
 
-No generated permission or schema changes were needed. No APK was installed or
+No generated permission or schema changes were needed in the first review round. No APK was installed or
 published. Revert `0f3dbd3` and then `6dd6e3e` to undo the example and implementation.
 
 Independent read-only review of `99bb465..0f3dbd3` found no actionable blockers in
 the six fixes. The reviewer explicitly retained the device-only limitations above.
+
+## Event follow-up validation — 2026-10-12
+
+Baseline: `545b52d`. The example's existing `main` capability still uses
+`core:default` and `floating-window:default`. The plugin default now includes
+native listener registration/removal; the example needs no broader capability.
+
+| Check | Result |
+| --- | --- |
+| `cargo test --offline --test event_permissions` from `src-tauri` | Exit 0; 2 passed using Tauri's real `RuntimeAuthority`, generated manifest and actual example capability |
+| `cargo check --offline --target aarch64-linux-android` from `src-tauri` | Exit 0; Android ACL/schema generation completed |
+| `bun test tests/events.test.ts` from plugin root | Exit 0; 2 passed |
+| Plugin `testDebugUnitTest` | Exit 0; 12 passed, including 4 touch regressions |
+| Plugin `assembleDebug` and `assembleDebugAndroidTest` | Exit 0; AAR and instrumentation APK compiled |
+
+Gradle commands run from `src-tauri/gen/android`, with JDK 21 and
+`--offline --console=plain '-Pkotlin.compiler.execution.strategy=in-process' '-Pkotlin.incremental=false'`.
+
+The ACL tests allow register/remove for local `main`, and reject both for an
+unrelated window, a remote origin, or `core:default` without the plugin permission.
+The JVM touch tests use Android's GestureDetector and FloatingX's actual parent
+dispatch with a consuming child View. They verify single and rapid taps, delivery
+of DOWN/UP to the child, cancellation and parent drag handling. Robolectric has
+no Chromium renderer, so these tests do not claim real HTML execution.
+
+`WebViewTouchTest` adds device tests with a real WebView and an HTML Close button:
+one tap reports the tag once and reaches the JavaScript interface; dragging goes
+to FloatingX without a click/close. This isolates touch delivery; full plugin IPC,
+system-overlay placement, and disposal remain in the manual checks above.
+These tests and `NotificationPersistenceTest` compiled but were **not run**:
+`adb devices` still reports no device. The existing full example APK identifier
+limitation from the first validation remains.
+
+Permissions, their reference/schema, and example platform schemas were regenerated
+by the normal plugin/application Cargo build scripts using Cargo/rustc 1.97.1 and
+Tauri 2.11.5. The Windows host test refreshes desktop schemas (including their stale
+`allow-ping` template entries); the Android check refreshes mobile schemas. None
+of these generated files were hand-edited. They are committed separately from the
+plugin fix and example tests.
