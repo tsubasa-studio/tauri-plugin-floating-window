@@ -86,4 +86,7 @@ avoids the machine's Kotlin daemon incremental-cache failure. Existing dependenc
 deprecation warnings and the missing `consumer-rules.pro` warning remain.
 
 No generated permission or schema changes were needed. No APK was installed or
-published. Revert the two review-fix commits to undo the implementation and example.
+published. Revert `0f3dbd3` and then `6dd6e3e` to undo the example and implementation.
+
+Independent read-only review of `99bb465..0f3dbd3` found no actionable blockers in
+the six fixes. The reviewer explicitly retained the device-only limitations above.
