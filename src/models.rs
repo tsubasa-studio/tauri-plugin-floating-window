@@ -9,6 +9,7 @@ pub struct CreateConfig {
     pub x: Option<f64>,
     pub y: Option<f64>,
     pub url: Option<String>,
+    pub notification: Option<NotificationConfig>,
     #[serde(default)]
     pub dev_server_url: Option<String>,
     #[serde(default)]
@@ -40,4 +41,14 @@ pub struct MoveConfig {
 #[serde(rename_all = "camelCase")]
 pub struct PermissionResponse {
     pub granted: bool,
+}
+
+/// App-wide foreground notification. The most recent create() supplies the text.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationConfig {
+    pub title: Option<String>,
+    pub body: Option<String>,
+    pub channel_name: Option<String>,
+    pub channel_description: Option<String>,
 }

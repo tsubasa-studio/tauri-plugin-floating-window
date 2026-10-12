@@ -4,7 +4,7 @@ use std::{
     fs,
     hash::{Hash, Hasher},
     io,
-    path::{Component, Path, PathBuf},
+    path::PathBuf,
 };
 
 #[cfg(target_os = "android")]
@@ -70,72 +70,26 @@ fn prepare_android_assets<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf> {
         .app_cache_dir()
         .map_err(|error| io::Error::other(format!("failed to resolve app cache dir: {error}")))?
         .join("floating-window-assets");
-    let asset_root = base_dir.join(&fingerprint);
-    let completion_marker = asset_root.join(".complete");
-    if completion_marker.is_file() {
-        return Ok(asset_root);
-    }
-
-    fs::create_dir_all(&base_dir)?;
-    let temporary_root = base_dir.join(format!(".{fingerprint}.tmp-{}", std::process::id()));
-    if temporary_root.exists() {
-        fs::remove_dir_all(&temporary_root)?;
-    }
-    fs::create_dir_all(&temporary_root)?;
-
-    let extraction_result = (|| -> Result<()> {
-        for (path, _) in resolver.iter() {
-            let destination = safe_asset_path(&temporary_root, path.as_ref())?;
-            if let Some(parent) = destination.parent() {
-                fs::create_dir_all(parent)?;
+    Ok(crate::asset_cache::prepare_cache(
+        &base_dir,
+        &fingerprint,
+        |root| {
+            for (path, _) in resolver.iter() {
+                let destination = crate::asset_cache::safe_asset_path(root, path.as_ref())?;
+                if let Some(parent) = destination.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                let asset = resolver.get(path.to_string()).ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!("failed to resolve bundled asset: {path}"),
+                    )
+                })?;
+                fs::write(destination, asset.bytes)?;
             }
-            let asset = resolver.get(path.to_string()).ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::NotFound,
-                    format!("failed to resolve bundled asset: {path}"),
-                )
-            })?;
-            fs::write(destination, asset.bytes)?;
-        }
-        fs::write(temporary_root.join(".complete"), fingerprint.as_bytes())?;
-        Ok(())
-    })();
-
-    if let Err(error) = extraction_result {
-        let _ = fs::remove_dir_all(&temporary_root);
-        return Err(error);
-    }
-
-    if asset_root.exists() {
-        fs::remove_dir_all(&asset_root)?;
-    }
-    fs::rename(&temporary_root, &asset_root)?;
-    Ok(asset_root)
-}
-
-#[cfg(target_os = "android")]
-fn safe_asset_path(root: &Path, asset_path: &str) -> io::Result<PathBuf> {
-    let mut destination = root.to_path_buf();
-    for component in Path::new(asset_path).components() {
-        match component {
-            Component::Normal(segment) => destination.push(segment),
-            Component::CurDir | Component::RootDir => {}
-            Component::ParentDir | Component::Prefix(_) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("invalid bundled asset path: {asset_path}"),
-                ));
-            }
-        }
-    }
-
-    if destination == root {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "bundled asset path is empty",
-        ));
-    }
-    Ok(destination)
+            Ok(())
+        },
+    )?)
 }
 
 #[command]

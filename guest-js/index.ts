@@ -1,13 +1,26 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { addPluginListener, invoke } from "@tauri-apps/api/core";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 
 export interface CreateConfig {
   tag?: string;
+  /** Physical pixels; defaults to 260dp converted for the device. */
   width?: number;
+  /** Physical pixels; defaults to 320dp converted for the device. */
   height?: number;
+  /** Physical pixels from the overlay work area origin; defaults to 0. */
   x?: number;
+  /** Physical pixels from the overlay work area origin; defaults to 0. */
   y?: number;
   url?: string;
+  /** App-wide notification: latest create wins; blank/omitted fields use neutral defaults. */
+  notification?: NotificationConfig;
+}
+
+export interface NotificationConfig {
+  title?: string;
+  body?: string;
+  channelName?: string;
+  channelDescription?: string;
 }
 
 /** 检查是否已授予悬浮窗权限 (SYSTEM_ALERT_WINDOW) */
@@ -65,7 +78,24 @@ export async function destroy(tag?: string): Promise<void> {
 export async function onFloatingWindowClick(
   callback: (tag: string) => void,
 ): Promise<UnlistenFn> {
-  return await listen<{ tag: string }>("floating-window-click", (event) => {
-    callback(event.payload.tag);
-  });
+  return listenForTag("floating-window-click", callback);
+}
+
+/** 监听悬浮窗通过 AndroidFloatingWindow.close() 关闭的事件 */
+export async function onFloatingWindowClosed(
+  callback: (tag: string) => void,
+): Promise<UnlistenFn> {
+  return listenForTag("floating-window-closed", callback);
+}
+
+async function listenForTag(
+  event: string,
+  callback: (tag: string) => void,
+): Promise<UnlistenFn> {
+  const listener = await addPluginListener<{ tag: string }>(
+    "floating-window",
+    event,
+    (data) => callback(data.tag),
+  );
+  return () => listener.unregister();
 }

@@ -30,6 +30,9 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+    testOptions.unitTests.all {
+        it.systemProperty("floatingWindowAssets", project.file("../examples/tauri-app/dist").absolutePath)
+    }
 }
 
 dependencies {

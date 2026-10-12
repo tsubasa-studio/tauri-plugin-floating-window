@@ -7,6 +7,8 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
+import android.view.LayoutInflater
+import android.widget.FrameLayout
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -39,6 +41,7 @@ class CreateArgs {
     var url: String? = null
     var devServerUrl: String? = null
     var assetRoot: String? = null
+    var notification: NotificationArgs? = null
 }
 
 @InvokeArg
@@ -86,13 +89,12 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
+    private fun hasOverlayPermission(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(activity)
+
     @Command
     fun check_permission(invoke: Invoke) {
-        val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            Settings.canDrawOverlays(activity)
-        } else {
-            true
-        }
+        val granted = hasOverlayPermission()
         val ret = JSObject()
         ret.put("granted", granted)
         invoke.resolve(ret)
@@ -109,7 +111,7 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
             activity.startActivity(intent)
         }
         val ret = JSObject()
-        ret.put("granted", Settings.canDrawOverlays(activity))
+        ret.put("granted", hasOverlayPermission())
         invoke.resolve(ret)
     }
 
@@ -119,7 +121,12 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
         try {
             val args = invoke.parseArgs(CreateArgs::class.java)
             val tag = args.tag ?: DEFAULT_TAG
-            createdTag = tag
+            check(hasOverlayPermission()) {
+                "Overlay permission is required. Call requestPermission(), grant access, then retry create()."
+            }
+            val geometry = WindowGeometry.from(
+                args.width, args.height, args.x, args.y, activity.resources.displayMetrics.density
+            )
             val url = args.url
             val devServerUrl = args.devServerUrl
                 ?.trim()
@@ -138,9 +145,22 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
 
             // Reusing a tag must replace and release the previous WebView.
             disposeFloatingWindow(tag)
+            createdTag = tag
+            val layout = LayoutInflater.from(activity).inflate(R.layout.fx_default, FrameLayout(activity), false)
+            layout.layoutParams = FrameLayout.LayoutParams(geometry.width, geometry.height)
+            val webView = checkNotNull(layout.findViewById<WebView>(R.id.fx_webview)) {
+                "Floating window layout must contain a WebView"
+            }
+            // Register before installation so every failure path can release the WebView.
+            webViews[tag] = webView
             val control = FloatingX.install {
                 setContext(activity.application)
-                setLayout(R.layout.fx_default)
+                setLayoutView(layout)
+                setXY(geometry.x, geometry.y)
+                // Do not let FloatingX create an uninitialized window after an async grant.
+                setPermissionInterceptor { _, _ ->
+                    throw IllegalStateException("Overlay permission was revoked; grant access and retry create().")
+                }
                 setTag(tag)
                 setScopeType(FxScopeType.SYSTEM)
             }
@@ -153,82 +173,75 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
 
             control.show()
 
-            // Configure the WebView after the floating window is shown
-            val rootView = control.getView()
-            if (rootView != null) {
-                val webView = rootView.findViewById<WebView>(R.id.fx_webview)
-                if (webView != null) {
-                    webView.settings.javaScriptEnabled = true
-                    webView.settings.domStorageEnabled = true
-                    webView.settings.mediaPlaybackRequiresUserGesture = false
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
+            checkNotNull(control.getView()) { "Floating window view was not created" }
+            webView.settings.javaScriptEnabled = true
+            webView.settings.domStorageEnabled = true
+            webView.settings.mediaPlaybackRequiresUserGesture = false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
+            }
+
+            // Custom WebViewClient that serves tauri.localhost content,
+            // matching how the main Tauri WebView (WRY) serves assets.
+            webView.webViewClient = object : WebViewClient() {
+                override fun shouldInterceptRequest(
+                    view: WebView,
+                    request: WebResourceRequest
+                ): WebResourceResponse? {
+                    // Only intercept tauri.localhost requests;
+                    // let external URLs (API calls, etc.) load normally
+                    val host = request.url.host
+                    if (host != TAURI_DOMAIN) {
+                        return null
                     }
 
-                    // Custom WebViewClient that serves tauri.localhost content,
-                    // matching how the main Tauri WebView (WRY) serves assets.
-                    webView.webViewClient = object : WebViewClient() {
-                        override fun shouldInterceptRequest(
-                            view: WebView,
-                            request: WebResourceRequest
-                        ): WebResourceResponse? {
-                            // Only intercept tauri.localhost requests;
-                            // let external URLs (API calls, etc.) load normally
-                            val host = request.url.host
-                            if (host != TAURI_DOMAIN) {
-                                return null
-                            }
+                    // Only `tauri android dev` supplies a dev server URL.
+                    if (devServerUrl != null) {
+                        return proxyRequest(request, devServerUrl)
+                    }
 
-                            // Only `tauri android dev` supplies a dev server URL.
-                            if (devServerUrl != null) {
-                                return proxyRequest(request, devServerUrl)
-                            }
+                    // Build APKs use the assets extracted from Tauri's embedded Rust
+                    // resource bundle. Never fall through to the network for this host.
+                    return serveBundledAsset(request, bundledAssetRoot!!)
+                }
+            }
 
-                            // Build APKs use the assets extracted from Tauri's embedded Rust
-                            // resource bundle. Never fall through to the network for this host.
-                            return serveBundledAsset(request, bundledAssetRoot!!)
+            // Transparent background so the content floats over other apps
+            webView.setBackgroundColor(Color.TRANSPARENT)
+
+            // Expose a JS interface so the WebView can close itself
+            // (the standalone WebView has no Tauri IPC bridge)
+            webView.addJavascriptInterface(
+                object : Any() {
+                    @JavascriptInterface
+                    fun close() {
+                        activity.runOnUiThread {
+                            try {
+                                // Notify the host to clean up its window state.
+                                // Android WebViews share localStorage (same origin) but
+                                // do NOT fire storage events across WebView instances,
+                                // so the Tauri event bridge is needed for notification.
+                                val data = JSObject()
+                                data.put("tag", tag)
+                                trigger("floating-window-closed", data)
+                                disposeFloatingWindow(tag)
+                            } catch (_: Exception) {
+                            }
                         }
                     }
+                },
+                "AndroidFloatingWindow"
+            )
 
-                    // Transparent background so the pet floats over other apps
-                    webView.setBackgroundColor(Color.TRANSPARENT)
+            FloatingWindowForegroundService.start(activity.applicationContext, args.notification, updateConfiguration = true)
+            webView.onResume()
 
-                    // Expose a JS interface so the WebView can close itself
-                    // (the standalone WebView has no Tauri IPC bridge)
-                    webView.addJavascriptInterface(
-                        object : Any() {
-                            @JavascriptInterface
-                            fun close() {
-                                activity.runOnUiThread {
-                                    try {
-                                        // Notify the main app to clean up desktop pet state.
-                                        // Android WebViews share localStorage (same origin) but
-                                        // do NOT fire storage events across WebView instances,
-                                        // so the Tauri event bridge is needed for notification.
-                                        val data = JSObject()
-                                        data.put("tag", tag)
-                                        trigger("floating-window-closed", data)
-                                        disposeFloatingWindow(tag)
-                                    } catch (_: Exception) {
-                                    }
-                                }
-                            }
-                        },
-                        "AndroidFloatingWindow"
-                    )
-
-                    webViews[tag] = webView
-                    FloatingWindowForegroundService.start(activity.applicationContext)
-                    webView.onResume()
-
-                    if (url != null) {
-                        // Always load the tauri.localhost URL so the floating window
-                        // shares the main app's origin (localStorage is shared).
-                        // Build APK: extracted embedded assets are served locally.
-                        // Dev: shouldInterceptRequest proxies to the Vite dev server.
-                        webView.loadUrl(url)
-                    }
-                }
+            if (url != null) {
+                // Always load the tauri.localhost URL so the floating window
+                // shares the main app's origin (localStorage is shared).
+                // Build APK: extracted embedded assets are served locally.
+                // Dev: shouldInterceptRequest proxies to the Vite dev server.
+                webView.loadUrl(url)
             }
 
             val ret = JSObject()
@@ -253,32 +266,13 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
             ?.value
             .orEmpty()
         val requestedPath = request.url.path.orEmpty().trimStart('/')
-        val relativePath = if (
-            request.isForMainFrame || acceptHeader.contains("text/html", ignoreCase = true)
-        ) {
-            "index.html"
-        } else {
-            requestedPath
-        }
-
-        val file = resolveBundledAsset(assetRoot, relativePath)
-            ?: return errorResponse(404, "Not Found")
-        return fileResponse(request, file)
-    }
-
-    private fun resolveBundledAsset(assetRoot: File, relativePath: String): File? {
-        if (relativePath.isEmpty()) return null
-        return try {
-            val canonicalRoot = assetRoot.canonicalFile
-            val candidate = File(canonicalRoot, relativePath).canonicalFile
-            val allowedPrefix = canonicalRoot.path + File.separator
-            candidate.takeIf {
-                it.isFile && it.path.startsWith(allowedPrefix)
-            }
+        val file = try {
+            BundledAssets.resolve(assetRoot, requestedPath, request.isForMainFrame, acceptHeader)
         } catch (e: Exception) {
-            Log.e(LOG_TAG, "Failed to resolve bundled asset $relativePath", e)
+            Log.e(LOG_TAG, "Failed to resolve bundled asset $requestedPath", e)
             null
-        }
+        } ?: return errorResponse(404, "Not Found")
+        return fileResponse(request, file)
     }
 
     private fun fileResponse(

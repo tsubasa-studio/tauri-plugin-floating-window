@@ -10,6 +10,8 @@ mod desktop;
 #[cfg(mobile)]
 mod mobile;
 
+#[cfg(any(target_os = "android", test))]
+mod asset_cache;
 mod commands;
 mod error;
 mod models;

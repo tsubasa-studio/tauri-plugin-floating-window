@@ -87,6 +87,7 @@ import {
   moveWindow,
   destroy,
   onFloatingWindowClick,
+  onFloatingWindowClosed,
 } from "tauri-plugin-floating-window-api";
 ```
 
@@ -97,7 +98,7 @@ import {
 - `requestPermission(): Promise<boolean>`
   - 请求悬浮窗权限。Android 上会跳转系统权限设置页。
 - `create(config?: CreateConfig): Promise<string>`
-  - 创建并显示悬浮窗，返回浮窗 `tag`。
+  - 创建并显示悬浮窗，初始化完成后返回 `tag`。未授权时 reject；需授权后重新调用。
 - `show(tag?: string): Promise<void>`
   - 显示浮窗。
 - `hide(tag?: string): Promise<void>`
@@ -107,7 +108,9 @@ import {
 - `destroy(tag?: string): Promise<void>`
   - 销毁悬浮窗。
 - `onFloatingWindowClick(callback: (tag: string) => void): Promise<UnlistenFn>`
-  - 监听悬浮窗点击事件。
+  - 通过原生插件 channel 监听点击事件；调用返回的函数取消监听。
+- `onFloatingWindowClosed(callback: (tag: string) => void): Promise<UnlistenFn>`
+  - 监听页面调用 `AndroidFloatingWindow.close()` 的关闭事件，取消监听方式相同。
 
 ### create 配置参数
 
@@ -119,13 +122,20 @@ interface CreateConfig {
   x?: number;
   y?: number;
   url?: string;
+  notification?: {
+    title?: string;
+    body?: string;
+    channelName?: string;
+    channelDescription?: string;
+  };
 }
 ```
 
 - `tag`: 浮窗标识，默认值为 `default`
-- `width` / `height`: 悬浮窗大小
-- `x` / `y`: 初始位置
-- `url`: 加载页面地址，用于移动端 WebView 内容
+- `width` / `height`: 物理像素，必须为正数；省略时分别使用 260dp / 320dp 对应的像素大小
+- `x` / `y`: 非负物理像素，默认 (0, 0)，与 `moveWindow` 单位一致；相对于 FloatingX 可用区域，受系统 inset 和屏幕边界约束
+- `url`: 加载页面地址，用于移动端 WebView 内容。打包后优先匹配真实文件（例如 `/floating.html`），仅不存在且无文件扩展名的 HTML 主框架导航回退到 `index.html`
+- `notification`: 前台服务的应用级文案配置。最后一次 `create` 提供的配置生效，`show` 保留配置；空白或省略字段使用应用名称和中性文案。保存至应用私有偏好，在服务重建时恢复；省略整个配置重新创建窗口可恢复默认值
 
 ### 简单示例
 
@@ -133,6 +143,9 @@ interface CreateConfig {
 const granted = await checkPermission();
 if (!granted) {
   await requestPermission();
+  // 此调用只打开设置页，不等待用户完成授权。
+  // 返回应用后重新检查 checkPermission()，确认后再调用 create()。
+  return;
 }
 
 const tag = await create({
@@ -157,3 +170,24 @@ bun tauri build
 - `examples/tauri-app/` 的 `package.json` 使用 `file:../../` 来依赖本插件 JS API。
 - Android 端已实现悬浮窗权限与窗口生命周期管理。
 - iOS 端插件绑定已接入，需在 Xcode/macOS 环境中编译测试。
+
+## 宿主通知配置与回归示例
+
+```ts
+await create({
+  url: "http://tauri.localhost/floating.html",
+  notification: {
+    title: "My App is active",
+    body: "Tap to return to My App",
+    channelName: "My App overlay status",
+    channelDescription: "Keeps the app overlay visible",
+  },
+});
+```
+
+应用品牌和业务措辞由宿主提供。默认标题是宿主应用名称；默认正文说明
+悬浮窗正在运行并可点击返回应用。前台服务保持 `START_NOT_STICKY`，保存
+文案不等于自动恢复被杀死的窗口。
+
+示例提供默认/自定义文案切换、两组几何参数、并发创建及点击/关闭日志。
+完整操作见 [示例回归检查](../examples/tauri-app/REVIEW-REGRESSION.md)。
