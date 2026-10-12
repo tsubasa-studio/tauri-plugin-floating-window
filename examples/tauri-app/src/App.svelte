@@ -1,5 +1,5 @@
 <script>
-  import Greet from './lib/Greet.svelte'
+  import { onMount } from 'svelte'
   import {
     checkPermission,
     requestPermission,
@@ -9,10 +9,22 @@
     moveWindow,
     destroy,
     onFloatingWindowClick,
+    onFloatingWindowClosed,
   } from 'tauri-plugin-floating-window-api'
 
   let response = $state('')
   let permissionGranted = $state(false)
+  let customNotification = $state(false)
+  const presets = [
+    { tag: 'default', width: 140, height: 140, x: 120, y: 120 },
+    { tag: 'second', width: 240, height: 180, x: 20, y: 350 },
+  ]
+  const notification = {
+    title: 'Floating Window Demo is active',
+    body: 'Tap to return to the demo controls',
+    channelName: 'Demo overlay status',
+    channelDescription: 'Keeps the example overlay visible',
+  }
 
   function log(msg) {
     response += `[${new Date().toLocaleTimeString()}] ${msg}\n`
@@ -36,19 +48,26 @@
     }
   }
 
-  async function _create() {
+  async function createPreset(preset) {
+    return create({
+      ...preset,
+      url: 'http://tauri.localhost/floating.html',
+      notification: customNotification ? notification : undefined,
+    })
+  }
+
+  async function _create(index = 0) {
     try {
-      const tag = await create({
-        width: 140,
-        height: 140,
-        x: 120,
-        y: 120,
-        url: 'http://tauri.localhost/floating.html',
-      })
-      log(`Created floating window: ${tag}`)
+      log(`Created floating window: ${await createPreset(presets[index])}`)
     } catch (e) {
       log(`Error: ${e}`)
     }
+  }
+
+  async function _createBoth() {
+    const results = await Promise.allSettled(presets.map(createPreset))
+    results.forEach((result) => log(result.status === 'fulfilled'
+      ? `Concurrent create succeeded: ${result.value}` : `Error: ${result.reason}`))
   }
 
   async function _show() {
@@ -87,9 +106,25 @@
     }
   }
 
-  onFloatingWindowClick((tag) => {
-    log(`Floating window clicked: ${tag}`)
-  }).then(() => log('Click listener registered'))
+  onMount(() => {
+    let disposed = false
+    const unlisteners = []
+    for (const [subscribe, label] of [
+      [onFloatingWindowClick, 'clicked'],
+      [onFloatingWindowClosed, 'closed'],
+    ]) {
+      subscribe((tag) => log(`Floating window ${label}: ${tag}`))
+        .then((unlisten) => {
+          if (disposed) unlisten()
+          else unlisteners.push(unlisten)
+        })
+        .catch((error) => log(`Listener error: ${error}`))
+    }
+    return () => {
+      disposed = true
+      unlisteners.forEach((unlisten) => unlisten())
+    }
+  })
 </script>
 
 <main class="container">
@@ -111,7 +146,11 @@
     <button onclick={_checkPermission}>Check Permission</button>
     <button onclick={_requestPermission}>Request Permission</button>
     <hr />
-    <button onclick={_create}>Create Floating Window</button>
+    <label><input type="checkbox" bind:checked={customNotification} /> Custom notification text</label>
+    <button onclick={() => _create(0)}>Create 140 × 140 at (120, 120) px</button>
+    <button onclick={() => _create(1)}>Create 240 × 180 at (20, 350) px</button>
+    <button onclick={_createBoth}>Create both concurrently</button>
+    <button onclick={() => destroy('second').then(() => log('Second window destroyed')).catch((e) => log(`Error: ${e}`))}>Destroy second window</button>
     <button onclick={_show}>Show</button>
     <button onclick={_hide}>Hide</button>
     <button onclick={_move}>Move (200,400)</button>
