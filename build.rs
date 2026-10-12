@@ -6,6 +6,9 @@ const COMMANDS: &[&str] = &[
   "hide",
   "move_window",
   "destroy",
+  // Implemented by Tauri's native Plugin base class; ACL runs before dispatch.
+  "register_listener",
+  "remove_listener",
 ];
 
 fn main() {

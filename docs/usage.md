@@ -108,9 +108,13 @@ import {
 - `destroy(tag?: string): Promise<void>`
   - 销毁悬浮窗。
 - `onFloatingWindowClick(callback: (tag: string) => void): Promise<UnlistenFn>`
-  - 通过原生插件 channel 监听点击事件；调用返回的函数取消监听。
+  - 通过原生插件 channel 监听 WebView 轻点事件；拖动、取消不触发，页面按钮仍可响应。调用返回的函数取消监听。
 - `onFloatingWindowClosed(callback: (tag: string) => void): Promise<UnlistenFn>`
   - 监听页面调用 `AndroidFloatingWindow.close()` 的关闭事件，取消监听方式相同。
+
+事件订阅和注销需要 `floating-window:allow-register-listener` 与
+`floating-window:allow-remove-listener`，已包含在 `floating-window:default` 中。
+仅配置 `core:default` 无法调用本插件的监听命令。
 
 ### create 配置参数
 

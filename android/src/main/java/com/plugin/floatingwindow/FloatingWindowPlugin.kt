@@ -165,11 +165,11 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
                 setScopeType(FxScopeType.SYSTEM)
             }
 
-            control.setClickListener {
+            webView.setOnTouchListener(WebViewTapListener(webView.context) {
                 val data = JSObject()
                 data.put("tag", tag)
                 trigger(CLICK_EVENT, data)
-            }
+            })
 
             control.show()
 
