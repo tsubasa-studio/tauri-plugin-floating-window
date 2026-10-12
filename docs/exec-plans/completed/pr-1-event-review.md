@@ -21,3 +21,11 @@ Cargo build scripts. Validation: 12 Android JVM tests, 2 actual example ACL test
 and 2 JS channel tests passed. Android Rust check, plugin AAR and instrumentation
 APK compilation passed. See `examples/tauri-app/REVIEW-REGRESSION.md` for commands,
 coverage boundaries and the outstanding device checks (no device connected).
+
+Commits: `2e8bf32` implementation/Android tests, `1414ea6` example ACL tests and
+validation record, `7b09825` generated artifacts. Independent read-only review of
+`545b52d..7b0982585735172c8110c20324bc5751fbefe60e` found no actionable blockers.
+The final committed Kotlin sources passed the combined JVM/AAR/instrumentation
+build again (12 JVM tests). Real WebView instrumentation remains unexecuted, and
+full plugin IPC, system-overlay interaction and disposal still need device
+acceptance. No merge, install, or release was performed.
