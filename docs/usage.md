@@ -14,10 +14,14 @@
 
 - Node.js + bun
 - Rust toolchain（≥ 1.77.2）
-- Android：Android SDK / NDK
+- Android：Android Studio、Android SDK / NDK、JDK 17 或 21；本示例已用 JDK 21 验证
 - iOS：Xcode / macOS（若编译 iOS 示例）
 
 ## 快速开始
+
+**插件根目录不能直接启动 App。** `dev` 和 `tauri` 脚本都在
+`examples/tauri-app/package.json` 中。本文使用示例依赖里的 `@tauri-apps/cli`，
+通过 `bun run tauri` 调用，无需另装全局 `cargo-tauri`。
 
 ### 1. 构建插件 JS API
 
@@ -39,36 +43,89 @@ bun install
 
 #### 3.1 桌面开发模式
 
-如果希望在桌面上调试前端和插件逻辑，可使用：
+以下命令均在 `examples/tauri-app` 目录执行。桌面预览前端可使用：
 
 ```powershell
-bun tauri dev
+bun run tauri dev
 ```
 
-这会同时启动前端和 Rust 后端，适合快速验证插件 API 调用。
+这会同时启动前端和 Rust 后端。Android 悬浮窗功能需要在 Android 上验证。
 
 > 注意：`bun tauri dev` 只是用于桌面预览，不等同于 Android/iOS 的移动端运行方式。
 
 #### 3.2 Android 运行
 
-要在 Android 设备/模拟器上运行示例 App，请使用：
+先在当前 PowerShell 配置 Java 和 SDK。下面是本机已验证的安装路径；
+其他机器请换成自己的路径，NDK 版本以 SDK Manager 中实际安装的版本为准。
 
 ```powershell
-cargo tauri android dev
+$env:JAVA_HOME = "$env:USERPROFILE\.jdks\jbr-21.0.11"
+$env:ANDROID_HOME = "D:\Software\Development\Android\SDK"
+$env:NDK_HOME = "$env:ANDROID_HOME\ndk\27.3.13750724"
+$env:PATH = "$env:JAVA_HOME\bin;$env:ANDROID_HOME\platform-tools;$env:PATH"
+
+& "$env:JAVA_HOME\bin\java.exe" -version
+adb devices -l
 ```
 
-如果你更习惯 Android Studio，也可以直接打开生成的 Android 项目：
+这些赋值只影响当前终端及其启动的进程。Android Studio 的
+Settings → Build, Execution, Deployment → Build Tools → Gradle → Gradle JDK
+也需选择 JDK 17 或 21；默认随 Studio 安装的 JDK 25 不适用于当前 Gradle 8.14.3。
 
-`examples/tauri-app/src-tauri/gen/android`
+**使用 Android Studio 调试真机或模拟器：**
 
-在 Android Studio 中导入该目录为 Gradle 项目，然后运行或调试即可。
+```powershell
+# 在 examples/tauri-app 下；选择电脑的 WLAN/以太网地址
+bun run tauri android dev --open --force-ip-prompt
+
+# 或明确指定该地址（示例 IP，换网络后需重新确认）
+# bun run tauri android dev --open --host 192.168.50.159
+```
+
+命令会启动 Vite、准备 Rust 库并打开 `src-tauri/gen/android`。
+**保持这个终端运行**，然后在 Studio 里等待 Gradle 同步完成，选择 `app`
+运行配置和目标设备，点击 Run 或 Debug。仅手动打开 Gradle 目录而没有运行
+Tauri CLI，无法完整准备 Rust 构建和开发服务。
+
+- 真机：开启开发者选项和 USB 调试，USB 连接后在手机上确认调试授权。
+  `adb devices -l` 应显示 `device`；`unauthorized` 表示尚未确认授权。
+- 模拟器：在 Studio 的 Device Manager 启动 AVD，再从目标设备下拉框选择它。
+- 使用电脑局域网 IP 时，真机需能访问该地址，通常让手机和电脑连接同一 Wi-Fi。
+  不要选择代理、VPN 或 WSL 的虚拟网卡地址。本机自动选择曾命中 Mihomo 的
+  `28.0.0.1`，应改选实际 WLAN 地址。示例 Vite 已读取 `TAURI_DEV_HOST`。
+
+**直接从终端运行到设备：**
+
+```powershell
+bun run tauri android dev --force-ip-prompt
+```
+
+已有 `src-tauri/gen/android` 时无需重新初始化；仅新环境缺少该目录时先运行
+`bun run tauri android init`。首次编译 Rust/Gradle 依赖可能需要几分钟。
+
+App 启动后先点 Request Permission，在系统页允许悬浮窗，再返回 App 点 Create。
+手机端授权弹窗需手动确认。调试前端可在电脑 Chrome 打开 `chrome://inspect/#devices`；
+原生日志和 Kotlin 断点使用 Android Studio 的 Logcat/Debug。
+
+官方流程参考：[Tauri 移动端开发与 Android Studio](https://v2.tauri.app/develop/#using-xcode-or-android-studio)。
+
+#### 3.2.1 常见启动错误
+
+| 报错或现象 | 处理 |
+| --- | --- |
+| `cargo: no such command: tauri` | 使用示例目录里的 `bun run tauri android dev --open`；Bun CLI 和 Cargo 子命令是两种安装方式 |
+| `Script not found "dev"` | 当前在插件根目录；先 `cd examples\tauri-app` |
+| `Unsupported class file major version 69` | 使用 JDK 21，同时核对 Studio 的 Gradle JDK |
+| SDK/NDK 找不到，或路径混用 C 盘和 D 盘 | 核对 `ANDROID_HOME`、`NDK_HOME` 和 `src-tauri/gen/android/local.properties` 的 `sdk.dir` 指向实际安装位置 |
+| 设备白屏、连不上 Vite | 确认终端仍在运行、设备能访问终端打印的 `http://<电脑IP>:1420/`，并选对 `--host` 地址 |
+| `Port 1420 is already in use` | 先停止自己之前启动的 Vite/Tauri 开发进程，再启动一份 |
 
 #### 3.3 iOS 运行（macOS 环境）
 
 要在 iOS 模拟器上运行示例 App，请使用：
 
 ```bash
-cargo tauri ios dev
+bun run tauri ios dev
 ```
 
 > 如果只想预览前端界面，可运行 `bun dev`，但此时 Tauri IPC 不可用，悬浮窗插件功能不能正常工作。
@@ -165,8 +222,15 @@ await moveWindow(tag, 200, 300, true);
 
 ## 构建生产包
 
+打包命令也在 `examples/tauri-app` 执行。当前示例使用模板 identifier
+`com.tauri.dev`，Tauri 的正式打包检查会拒绝该值；打包前需改成自己的应用标识，
+并同步原生 Android 项目的包名/namespace。这不影响上面的 Android 开发命令。
+
 ```powershell
-bun tauri build
+# 桌面包
+bun run tauri build
+# Android APK
+bun run tauri android build --apk
 ```
 
 ## 说明
