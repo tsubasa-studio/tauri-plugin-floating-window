@@ -2,12 +2,53 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PingRequest {
-  pub value: Option<String>,
+pub struct CreateConfig {
+    pub tag: Option<String>,
+    pub width: Option<f64>,
+    pub height: Option<f64>,
+    pub x: Option<f64>,
+    pub y: Option<f64>,
+    pub url: Option<String>,
+    pub notification: Option<NotificationConfig>,
+    #[serde(default)]
+    pub dev_server_url: Option<String>,
+    #[serde(default)]
+    pub asset_root: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PingResponse {
-  pub value: Option<String>,
+pub struct CreateResponse {
+    pub tag: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagRequest {
+    pub tag: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveConfig {
+    pub tag: Option<String>,
+    pub x: f64,
+    pub y: f64,
+    pub animated: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionResponse {
+    pub granted: bool,
+}
+
+/// App-wide foreground notification. The most recent create() supplies the text.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationConfig {
+    pub title: Option<String>,
+    pub body: Option<String>,
+    pub channel_name: Option<String>,
+    pub channel_description: Option<String>,
 }

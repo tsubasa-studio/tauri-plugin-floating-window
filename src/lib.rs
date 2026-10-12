@@ -10,6 +10,8 @@ mod desktop;
 #[cfg(mobile)]
 mod mobile;
 
+#[cfg(any(target_os = "android", test))]
+mod asset_cache;
 mod commands;
 mod error;
 mod models;
@@ -35,7 +37,15 @@ impl<R: Runtime, T: Manager<R>> crate::FloatingWindowExt<R> for T {
 /// Initializes the plugin.
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
   Builder::new("floating-window")
-    .invoke_handler(tauri::generate_handler![commands::ping])
+    .invoke_handler(tauri::generate_handler![
+      commands::check_permission,
+      commands::request_permission,
+      commands::create,
+      commands::show,
+      commands::hide,
+      commands::move_window,
+      commands::destroy,
+    ])
     .setup(|app, api| {
       #[cfg(mobile)]
       let floating_window = mobile::init(app, api)?;
