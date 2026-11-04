@@ -11,6 +11,8 @@ Default permissions for the floating-window plugin
 - `allow-hide`
 - `allow-move-window`
 - `allow-destroy`
+- `allow-state-read`
+- `allow-state-compare-and-set`
 - `allow-register-listener`
 - `allow-remove-listener`
 
@@ -253,6 +255,58 @@ Enables the show command without any pre-configured scope.
 <td>
 
 Denies the show command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`floating-window:allow-state-compare-and-set`
+
+</td>
+<td>
+
+Enables the state_compare_and_set command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`floating-window:deny-state-compare-and-set`
+
+</td>
+<td>
+
+Denies the state_compare_and_set command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`floating-window:allow-state-read`
+
+</td>
+<td>
+
+Enables the state_read command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`floating-window:deny-state-read`
+
+</td>
+<td>
+
+Denies the state_read command without any pre-configured scope.
 
 </td>
 </tr>

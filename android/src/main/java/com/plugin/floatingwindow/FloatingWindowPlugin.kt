@@ -50,6 +50,13 @@ class TagArgs {
 }
 
 @InvokeArg
+class PetStateArgs {
+    var scope: String = ""
+    var expected: String = ""
+    var next: String = ""
+}
+
+@InvokeArg
 class MoveArgs {
     var tag: String? = null
     var x: Double? = null
@@ -59,6 +66,28 @@ class MoveArgs {
 
 @TauriPlugin
 class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
+
+    private val petStateStorage = PetStateStorage(activity.applicationContext)
+
+    @Command
+    fun state_read(invoke: Invoke) {
+        try {
+            val args = invoke.parseArgs(PetStateArgs::class.java)
+            val response = JSObject()
+            response.put("value", petStateStorage.read(args.scope))
+            invoke.resolve(response)
+        } catch (e: Exception) { invoke.reject(e.message ?: "Pet state read failed") }
+    }
+
+    @Command
+    fun state_compare_and_set(invoke: Invoke) {
+        try {
+            val args = invoke.parseArgs(PetStateArgs::class.java)
+            val response = JSObject()
+            response.put("committed", petStateStorage.compareAndSet(args.scope, args.expected, args.next))
+            invoke.resolve(response)
+        } catch (e: Exception) { invoke.reject(e.message ?: "Pet state write failed") }
+    }
 
     companion object {
         private const val DEFAULT_TAG = "default"
@@ -70,8 +99,10 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     private val webViews = mutableMapOf<String, WebView>()
+    private val petWindows = mutableMapOf<String, PetOverlayWindow>()
 
     private fun disposeFloatingWindow(tag: String) {
+        petWindows.remove(tag)?.dispose()
         val webView = webViews.remove(tag)
         try {
             FloatingX.control(tag).cancel()
@@ -132,6 +163,18 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
                 ?.trim()
                 ?.takeIf { it.isNotEmpty() }
                 ?.trimEnd('/')
+            // Rust only supplies this from build.dev_url in a development build.
+            val devOrigin = devServerUrl?.let(Uri::parse)
+            fun effectivePort(uri: Uri): Int = if (uri.port >= 0) uri.port else if (uri.scheme == "https") 443 else 80
+            fun isPetRuntimeUrl(uri: Uri): Boolean {
+                if (uri.path != "/desktop-pet" || uri.userInfo != null ||
+                    (uri.scheme != "http" && uri.scheme != "https")) return false
+                val bundled = uri.host == TAURI_DOMAIN && uri.port == -1
+                val development = devOrigin != null && uri.scheme == devOrigin.scheme &&
+                    uri.host == devOrigin.host && effectivePort(uri) == effectivePort(devOrigin)
+                return bundled || development
+            }
+            val petRuntimePage = url?.let(Uri::parse)?.let(::isPetRuntimeUrl) == true
             val bundledAssetRoot = args.assetRoot
                 ?.trim()
                 ?.takeIf { it.isNotEmpty() }
@@ -153,7 +196,9 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
             }
             // Register before installation so every failure path can release the WebView.
             webViews[tag] = webView
-            val control = FloatingX.install {
+            val petWindow = if (petRuntimePage) PetOverlayWindow(activity.applicationContext, layout, webView, geometry) else null
+            if (petWindow != null) petWindows[tag] = petWindow
+            val control = if (petWindow == null) FloatingX.install {
                 setContext(activity.application)
                 setLayoutView(layout)
                 setXY(geometry.x, geometry.y)
@@ -163,17 +208,31 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
                 }
                 setTag(tag)
                 setScopeType(FxScopeType.SYSTEM)
-            }
+            } else null
 
-            webView.setOnTouchListener(WebViewTapListener(webView.context) {
+            fun closePet() {
+                if (webViews[tag] !== webView) return
+                val data = JSObject()
+                data.put("tag", tag)
+                trigger("floating-window-closed", data)
+                disposeFloatingWindow(tag)
+            }
+            val petBridge = petWindow?.let { PetOverlayBridge(it, { webViews[tag] === webView }, ::closePet) }
+            if (petBridge != null) webView.addJavascriptInterface(petBridge, "PetOverlay")
+
+            val tapListener = WebViewTapListener(webView.context) {
                 val data = JSObject()
                 data.put("tag", tag)
                 trigger(CLICK_EVENT, data)
-            })
+            }
+            webView.setOnTouchListener { view, event ->
+                petWindow?.observeTouch(event)
+                tapListener.onTouch(view, event)
+            }
 
-            control.show()
+            if (petWindow != null) petWindow.show() else control?.show()
 
-            checkNotNull(control.getView()) { "Floating window view was not created" }
+            if (control != null) checkNotNull(control.getView()) { "Floating window view was not created" }
             webView.settings.javaScriptEnabled = true
             webView.settings.domStorageEnabled = true
             webView.settings.mediaPlaybackRequiresUserGesture = false
@@ -184,6 +243,13 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
             // Custom WebViewClient that serves tauri.localhost content,
             // matching how the main Tauri WebView (WRY) serves assets.
             webView.webViewClient = object : WebViewClient() {
+                override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+                    petBridge?.newDocument()
+                }
+                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                    // Both initial access and navigation obey the same exact-origin policy.
+                    return petRuntimePage && !isPetRuntimeUrl(request.url)
+                }
                 override fun shouldInterceptRequest(
                     view: WebView,
                     request: WebResourceRequest
@@ -214,19 +280,19 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
             webView.addJavascriptInterface(
                 object : Any() {
                     @JavascriptInterface
+                    fun stateRead(scope: String): String {
+                        check(petRuntimePage) { "Pet state is only available to the pet overlay" }
+                        return petStateStorage.read(scope)
+                    }
+                    @JavascriptInterface
+                    fun stateCompareAndSet(scope: String, expected: String, next: String): Boolean {
+                        check(petRuntimePage) { "Pet state is only available to the pet overlay" }
+                        return petStateStorage.compareAndSet(scope, expected, next)
+                    }
+                    @JavascriptInterface
                     fun close() {
                         activity.runOnUiThread {
-                            try {
-                                // Notify the host to clean up its window state.
-                                // Android WebViews share localStorage (same origin) but
-                                // do NOT fire storage events across WebView instances,
-                                // so the Tauri event bridge is needed for notification.
-                                val data = JSObject()
-                                data.put("tag", tag)
-                                trigger("floating-window-closed", data)
-                                disposeFloatingWindow(tag)
-                            } catch (_: Exception) {
-                            }
+                            if (webViews[tag] === webView) closePet()
                         }
                     }
                 },
@@ -500,7 +566,7 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
             if (webViews.containsKey(tag)) {
                 FloatingWindowForegroundService.start(activity.applicationContext)
             }
-            FloatingX.control(tag).show()
+            petWindows[tag]?.show() ?: FloatingX.control(tag).show()
             invoke.resolve()
         } catch (e: Exception) {
             invoke.reject(e.message ?: "Failed to show floating window")
@@ -513,7 +579,7 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
             val args = invoke.parseArgs(TagArgs::class.java)
             val tag = args.tag ?: DEFAULT_TAG
             webViews[tag]?.onPause()
-            FloatingX.control(tag).hide()
+            petWindows[tag]?.hide() ?: FloatingX.control(tag).hide()
             invoke.resolve()
         } catch (e: Exception) {
             invoke.reject(e.message ?: "Failed to hide floating window")
@@ -528,7 +594,7 @@ class FloatingWindowPlugin(private val activity: Activity) : Plugin(activity) {
             val x = args.x?.toFloat() ?: 0f
             val y = args.y?.toFloat() ?: 0f
             val animated = args.animated ?: true
-            FloatingX.control(tag).move(x, y, animated)
+            petWindows[tag]?.move(x.toDouble(), y.toDouble()) ?: FloatingX.control(tag).move(x, y, animated)
             invoke.resolve()
         } catch (e: Exception) {
             invoke.reject(e.message ?: "Failed to move floating window")

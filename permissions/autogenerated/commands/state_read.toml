@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-state-read"
+description = "Enables the state_read command without any pre-configured scope."
+commands.allow = ["state_read"]
+
+[[permission]]
+identifier = "deny-state-read"
+description = "Denies the state_read command without any pre-configured scope."
+commands.deny = ["state_read"]
