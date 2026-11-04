@@ -119,6 +119,13 @@ internal class PetOverlayWindow(
         layouts.finish()?.let(::applyFit)
     }
 
+    /** Only the current motion lease may resize while it owns position writes. */
+    fun resize(widthDp: Double) {
+        require(widthDp.isFinite() && widthDp in 72.0..320.0)
+        val fit = appliedFit ?: throw java.util.concurrent.CancellationException("宠物布局尚未就绪")
+        applyFit(fit.copy(widthDp = widthDp))
+    }
+
     /** A compact media viewport; dimensions come from frontend layout config. */
     fun fit(fit: OverlayFit) {
         require(fit.widthDp.isFinite() && fit.widthDp in 72.0..320.0)

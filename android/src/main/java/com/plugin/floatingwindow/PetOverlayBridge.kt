@@ -83,6 +83,12 @@ internal class PetOverlayBridge(
                 window.move(position.getDouble("x"), position.getDouble("y"))
                 return window.geometry()
             }
+            "motion-resize" -> {
+                window.requireVisible()
+                if (motionToken != request.getString("token")) throw CancellationException("运动已取消")
+                window.resize(request.getDouble("widthDp"))
+                return window.geometry()
+            }
             "motion-end" -> if (motionToken == request.getString("token")) {
                 motionToken = null
                 window.endMotion()
