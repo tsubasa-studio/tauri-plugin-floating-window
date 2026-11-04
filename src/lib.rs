@@ -1,6 +1,6 @@
 use tauri::{
-  plugin::{Builder, TauriPlugin},
-  Manager, Runtime,
+    plugin::{Builder, TauriPlugin},
+    Manager, Runtime,
 };
 
 pub use models::*;
@@ -25,34 +25,36 @@ use mobile::FloatingWindow;
 
 /// Extensions to [`tauri::App`], [`tauri::AppHandle`] and [`tauri::Window`] to access the floating-window APIs.
 pub trait FloatingWindowExt<R: Runtime> {
-  fn floating_window(&self) -> &FloatingWindow<R>;
+    fn floating_window(&self) -> &FloatingWindow<R>;
 }
 
 impl<R: Runtime, T: Manager<R>> crate::FloatingWindowExt<R> for T {
-  fn floating_window(&self) -> &FloatingWindow<R> {
-    self.state::<FloatingWindow<R>>().inner()
-  }
+    fn floating_window(&self) -> &FloatingWindow<R> {
+        self.state::<FloatingWindow<R>>().inner()
+    }
 }
 
 /// Initializes the plugin.
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
-  Builder::new("floating-window")
-    .invoke_handler(tauri::generate_handler![
-      commands::check_permission,
-      commands::request_permission,
-      commands::create,
-      commands::show,
-      commands::hide,
-      commands::move_window,
-      commands::destroy,
-    ])
-    .setup(|app, api| {
-      #[cfg(mobile)]
-      let floating_window = mobile::init(app, api)?;
-      #[cfg(desktop)]
-      let floating_window = desktop::init(app, api)?;
-      app.manage(floating_window);
-      Ok(())
-    })
-    .build()
+    Builder::new("floating-window")
+        .invoke_handler(tauri::generate_handler![
+            commands::check_permission,
+            commands::request_permission,
+            commands::create,
+            commands::show,
+            commands::hide,
+            commands::move_window,
+            commands::destroy,
+            commands::state_read,
+            commands::state_compare_and_set,
+        ])
+        .setup(|app, api| {
+            #[cfg(mobile)]
+            let floating_window = mobile::init(app, api)?;
+            #[cfg(desktop)]
+            let floating_window = desktop::init(app, api)?;
+            app.manage(floating_window);
+            Ok(())
+        })
+        .build()
 }

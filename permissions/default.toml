@@ -8,6 +8,8 @@ permissions = [
   "allow-hide",
   "allow-move-window",
   "allow-destroy",
+  "allow-state-read",
+  "allow-state-compare-and-set",
   "allow-register-listener",
   "allow-remove-listener",
 ]

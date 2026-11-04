@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-state-compare-and-set"
+description = "Enables the state_compare_and_set command without any pre-configured scope."
+commands.allow = ["state_compare_and_set"]
+
+[[permission]]
+identifier = "deny-state-compare-and-set"
+description = "Denies the state_compare_and_set command without any pre-configured scope."
+commands.deny = ["state_compare_and_set"]

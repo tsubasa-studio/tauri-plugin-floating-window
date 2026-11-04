@@ -15,6 +15,15 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
 pub struct FloatingWindow<R: Runtime>(AppHandle<R>);
 
 impl<R: Runtime> FloatingWindow<R> {
+    pub fn state_read(&self, _payload: PetStateReadRequest) -> crate::Result<PetStateReadResponse> {
+        Err(crate::Error::DesktopNotSupported)
+    }
+    pub fn state_compare_and_set(
+        &self,
+        _payload: PetStateWriteRequest,
+    ) -> crate::Result<PetStateWriteResponse> {
+        Err(crate::Error::DesktopNotSupported)
+    }
     pub fn check_permission(&self) -> crate::Result<PermissionResponse> {
         Ok(PermissionResponse { granted: true })
     }

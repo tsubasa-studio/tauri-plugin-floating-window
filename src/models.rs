@@ -52,3 +52,21 @@ pub struct NotificationConfig {
     pub channel_name: Option<String>,
     pub channel_description: Option<String>,
 }
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct PetStateReadRequest {
+    pub scope: String,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct PetStateWriteRequest {
+    pub scope: String,
+    pub expected: String,
+    pub next: String,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct PetStateReadResponse {
+    pub value: String,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct PetStateWriteResponse {
+    pub committed: bool,
+}

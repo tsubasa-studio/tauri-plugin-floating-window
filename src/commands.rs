@@ -15,6 +15,30 @@ use crate::models::*;
 use crate::FloatingWindowExt;
 use crate::Result;
 
+#[command]
+pub(crate) async fn state_read<R: Runtime>(
+    app: AppHandle<R>,
+    scope: String,
+) -> Result<PetStateReadResponse> {
+    app.floating_window()
+        .state_read(PetStateReadRequest { scope })
+}
+
+#[command]
+pub(crate) async fn state_compare_and_set<R: Runtime>(
+    app: AppHandle<R>,
+    scope: String,
+    expected: String,
+    next: String,
+) -> Result<PetStateWriteResponse> {
+    app.floating_window()
+        .state_compare_and_set(PetStateWriteRequest {
+            scope,
+            expected,
+            next,
+        })
+}
+
 #[cfg(target_os = "android")]
 const ANDROID_ASSET_CACHE_FORMAT_VERSION: u8 = 2;
 
@@ -35,9 +59,13 @@ pub(crate) async fn create<R: Runtime>(
     app: AppHandle<R>,
     mut payload: CreateConfig,
 ) -> Result<CreateResponse> {
-    if tauri::is_dev() {
-        payload.dev_server_url = app.config().build.dev_url.as_ref().map(ToString::to_string);
-    }
+    // These capabilities are native-owned; never trust JS-supplied origins or paths.
+    payload.dev_server_url = if tauri::is_dev() {
+        app.config().build.dev_url.as_ref().map(ToString::to_string)
+    } else {
+        None
+    };
+    payload.asset_root = None;
 
     #[cfg(target_os = "android")]
     if !tauri::is_dev() {
